@@ -1,0 +1,7 @@
+[submodule "godot-headers"]
+	path = godot-headers
+	url = https://github.com/godotengine/godot-headers
+	branch = 3.x
+[submodule "libyuarel"]
+	path = libyuarel
+	url = https://github.com/jacketizer/libyuarel

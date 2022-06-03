@@ -1,0 +1,9 @@
+[gd_resource type="NativeScript" load_steps=2 format=2]
+
+[ext_resource path="res://bin/gd-url-parser.gdnlib" type="GDNativeLibrary" id=1]
+
+[resource]
+
+resource_name = "gd-url-parser"
+class_name = "URLParser"
+library = ExtResource( 1 )
