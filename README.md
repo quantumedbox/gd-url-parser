@@ -1,5 +1,5 @@
 # gd-url-parser URL Parsing Library
-Based on [url=https://github.com/jacketizer/libyuarel]libyuarel[/url]
+Based on [libyuarel](https://github.com/jacketizer/libyuarel)
 
 ## Example
 ```gdscript
