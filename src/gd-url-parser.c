@@ -12,8 +12,6 @@
 
 struct url_parser {
   struct yuarel yuarel_state;
-  struct yuarel_param query_params[MAX_QUERIES];
-  size_t query_count;
   char *buffer;
   size_t buffer_size;
 };
@@ -64,13 +62,12 @@ static godot_variant url_parser_parse(godot_object *p_instance, void *p_method_d
   (void)p_instance;
   (void)p_method_data;
 
-  char query_separator = '&';
   struct url_parser *instance = (struct url_parser *)p_user_data;
 
   godot_variant result;
   api->godot_variant_new_bool(&result, false);
 
-  if ((p_num_args == 0) || (p_num_args > 2)) {
+  if (p_num_args != 1) {
     ERROR("Invalid number of parameters passed");
     return result;
   }
@@ -78,22 +75,6 @@ static godot_variant url_parser_parse(godot_object *p_instance, void *p_method_d
   if (api->godot_variant_get_type(p_args[0]) != GODOT_VARIANT_TYPE_STRING) {
     ERROR("Input parameter should be of type String");
     return result;
-  }
-
-  if (p_num_args == 2) {
-    if (api->godot_variant_get_type(p_args[1]) != GODOT_VARIANT_TYPE_STRING) {
-      ERROR("Query parameter should be of type String");
-      return result;
-    }
-    godot_string str_variant = api->godot_variant_as_string(p_args[1]);
-    godot_char_string sep_str = api->godot_string_ascii(&str_variant);
-    if (api->godot_char_string_length(&sep_str) != 1) {
-      ERROR("Query string should be of size 1");
-      api->godot_char_string_destroy(&sep_str);
-      return result;
-    }
-    query_separator = api->godot_char_string_get_data(&sep_str)[0];
-    api->godot_char_string_destroy(&sep_str);
   }
 
   godot_string str_variant = api->godot_variant_as_string(p_args[0]);
@@ -118,8 +99,6 @@ static godot_variant url_parser_parse(godot_object *p_instance, void *p_method_d
     api->godot_char_string_destroy(&ch_str);
     return result;
   }
-
-  instance->query_count = yuarel_parse_query(instance->yuarel_state.query, query_separator, instance->query_params, MAX_QUERIES);
 
   api->godot_variant_destroy(&result);
   api->godot_variant_new_bool(&result, true);
@@ -149,6 +128,7 @@ IMPL_YUAREL_GETTER(username)
 IMPL_YUAREL_GETTER(password)
 IMPL_YUAREL_GETTER(host)
 IMPL_YUAREL_GETTER(path)
+IMPL_YUAREL_GETTER(query)
 IMPL_YUAREL_GETTER(fragment)
 
 
@@ -164,21 +144,50 @@ static GDCALLINGCONV godot_variant url_parser_get_port(godot_object *p_instance,
 }
 
 
-static GDCALLINGCONV godot_variant url_parser_get_query(godot_object *p_instance, void * p_method_data, void *p_user_data) {
+// todo: Make sure that `url_parser_parse` was called before
+static GDCALLINGCONV godot_variant url_parser_parse_query(godot_object *p_instance, void *p_method_data, void *p_user_data, int p_num_args, godot_variant **p_args) {
   (void)p_method_data;
   (void)p_instance;
   struct url_parser *instance = (struct url_parser *)p_user_data;
+
+  if (p_num_args > 1) {
+    ERROR("Invalid number of parameters passed");
+    goto RETURN_NIL;
+  }
+
+  char query_separator = '&';
+
+  if (p_num_args == 1) {
+    if (api->godot_variant_get_type(p_args[0]) != GODOT_VARIANT_TYPE_STRING) {
+      ERROR("Query separator should be of type String");
+      goto RETURN_NIL;
+    }
+    godot_string str_variant = api->godot_variant_as_string(p_args[0]);
+    godot_char_string sep_str = api->godot_string_ascii(&str_variant);
+    if (api->godot_char_string_length(&sep_str) != 1) {
+      ERROR("Query string should be of size 1");
+      api->godot_char_string_destroy(&sep_str);
+      goto RETURN_NIL;
+    }
+    query_separator = api->godot_char_string_get_data(&sep_str)[0];
+    api->godot_char_string_destroy(&sep_str);
+  }
+
+  struct yuarel_param quary_params[MAX_QUERIES];
+  size_t query_count = yuarel_parse_query(instance->yuarel_state.query, query_separator, quary_params, MAX_QUERIES);
+
   godot_array res_arr;
+
   api->godot_array_new(&res_arr);
-  for (size_t i = 0; i < instance->query_count; i++) {
+  for (size_t i = 0; i < query_count; i++) {
     // todo: Really convoluted and so much copying and allocating >_<
     godot_array pair;
     api->godot_array_new(&pair);
     godot_variant intermediate;
-    CHARSTR_TO_VARIANT(&intermediate, instance->query_params[i].key);
+    CHARSTR_TO_VARIANT(&intermediate, quary_params[i].key);
     api->godot_array_push_back(&pair, &intermediate);
     api->godot_variant_destroy(&intermediate);
-    CHARSTR_TO_VARIANT(&intermediate, instance->query_params[i].val);
+    CHARSTR_TO_VARIANT(&intermediate, quary_params[i].val);
     api->godot_array_push_back(&pair, &intermediate);
     api->godot_variant_destroy(&intermediate);
     api->godot_variant_new_array(&intermediate, &pair);
@@ -190,6 +199,11 @@ static GDCALLINGCONV godot_variant url_parser_get_query(godot_object *p_instance
   api->godot_variant_new_array(&result, &res_arr);
   api->godot_array_destroy(&res_arr);
   return result;
+RETURN_NIL: {
+    godot_variant result;
+    api->godot_variant_new_nil(&result);
+    return result;
+  }
 }
 
 
@@ -202,10 +216,11 @@ void GDN_EXPORT godot_nativescript_init(void *p_handle) {
 
   nativescript_api->godot_nativescript_register_class(p_handle, "URLParser", "Node", create, destroy);
 
+  godot_method_attributes basic_method_attribs = { .rpc_type = GODOT_METHOD_RPC_MODE_DISABLED };
+
   godot_instance_method parse_method = { NULL, NULL, NULL };
   parse_method.method = &url_parser_parse;
-  godot_method_attributes parse_attribs = { .rpc_type = GODOT_METHOD_RPC_MODE_DISABLED };
-  nativescript_api->godot_nativescript_register_method(p_handle, "URLParser", "parse", parse_attribs, parse_method);
+  nativescript_api->godot_nativescript_register_method(p_handle, "URLParser", "parse", basic_method_attribs, parse_method);
 
   godot_property_attributes string_property_attribs = {
     .rset_type = GODOT_METHOD_RPC_MODE_DISABLED,
@@ -228,15 +243,10 @@ void GDN_EXPORT godot_nativescript_init(void *p_handle) {
   STRING_GETTER(host);
   STRING_GETTER(port);
   STRING_GETTER(path);
+  STRING_GETTER(query);
   STRING_GETTER(fragment);
 
-  godot_property_attributes array_property_attribs = {
-    .rset_type = GODOT_METHOD_RPC_MODE_DISABLED,
-    .type = GODOT_VARIANT_TYPE_ARRAY,
-    .usage = GODOT_PROPERTY_USAGE_DEFAULT,
-  };
-
-  godot_property_get_func get_query = { NULL, NULL, NULL };
-  get_query.get_func = &url_parser_get_query;
-  nativescript_api->godot_nativescript_register_property(p_handle, "URLParser", "query", &array_property_attribs, no_setter, get_query);
+  godot_instance_method get_query_parsed = { NULL, NULL, NULL };
+  get_query_parsed.method = &url_parser_parse_query;
+  nativescript_api->godot_nativescript_register_method(p_handle, "URLParser", "parse_query", basic_method_attribs, get_query_parsed);
 }
